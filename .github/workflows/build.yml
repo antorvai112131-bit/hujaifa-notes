@@ -24,14 +24,11 @@ jobs:
       with:
         gradle-version: '8.7'
 
-    - name: Download MainActivity from Pastebin and Build Project
+    - name: Generate Complete Android Project
       run: |
         mkdir -p app/src/main/java/com/personal/colorfulnotes
-        
-        # 1. Download MainActivity.kt from your Pastebin link
-        curl -sL https://pastebin.com/raw/Rb2iAi53 -o app/src/main/java/com/personal/colorfulnotes/MainActivity.kt
 
-        # 2. Generate settings.gradle.kts
+        # 1. Generate settings.gradle.kts
         cat << 'EOF' > settings.gradle.kts
         pluginManagement {
             repositories {
@@ -51,7 +48,7 @@ jobs:
         include(":app")
         EOF
 
-        # 3. Generate root build.gradle.kts
+        # 2. Generate root build.gradle.kts
         cat << 'EOF' > build.gradle.kts
         buildscript {
             repositories {
@@ -66,7 +63,7 @@ jobs:
         }
         EOF
 
-        # 4. Generate app/build.gradle.kts
+        # 3. Generate app/build.gradle.kts
         cat << 'EOF' > app/build.gradle.kts
         plugins {
             id("com.android.application")
@@ -126,7 +123,7 @@ jobs:
         }
         EOF
 
-        # 5. Generate AndroidManifest.xml
+        # 4. Generate AndroidManifest.xml
         cat << 'EOF' > app/src/main/AndroidManifest.xml
         <?xml version="1.0" encoding="utf-8"?>
         <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -148,6 +145,482 @@ jobs:
                 </activity>
             </application>
         </manifest>
+        EOF
+
+        # 5. Generate MainActivity.kt directly (No Pastebin dependency)
+        cat << 'EOF' > app/src/main/java/com/personal/colorfulnotes/MainActivity.kt
+        package com.personal.colorfulnotes
+
+        import android.content.Context
+        import android.content.Intent
+        import android.os.Bundle
+        import androidx.activity.ComponentActivity
+        import androidx.activity.compose.BackHandler
+        import androidx.activity.compose.setContent
+        import androidx.compose.foundation.BorderStroke
+        import androidx.compose.foundation.background
+        import androidx.compose.foundation.border
+        import androidx.compose.foundation.clickable
+        import androidx.compose.foundation.isSystemInDarkTheme
+        import androidx.compose.foundation.layout.*
+        import androidx.compose.foundation.lazy.LazyColumn
+        import androidx.compose.foundation.lazy.LazyRow
+        import androidx.compose.foundation.lazy.items
+        import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+        import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+        import androidx.compose.foundation.lazy.staggeredgrid.items
+        import androidx.compose.foundation.rememberScrollState
+        import androidx.compose.foundation.shape.CircleShape
+        import androidx.compose.foundation.shape.RoundedCornerShape
+        import androidx.compose.foundation.verticalScroll
+        import androidx.compose.material.icons.Icons
+        import androidx.compose.material.icons.automirrored.filled.ArrowBack
+        import androidx.compose.material.icons.filled.*
+        import androidx.compose.material3.*
+        import androidx.compose.runtime.*
+        import androidx.compose.ui.Alignment
+        import androidx.compose.ui.Modifier
+        import androidx.compose.ui.draw.clip
+        import androidx.compose.ui.graphics.Color
+        import androidx.compose.ui.platform.LocalContext
+        import androidx.compose.ui.text.font.FontWeight
+        import androidx.compose.ui.text.style.TextOverflow
+        import androidx.compose.ui.unit.dp
+        import androidx.compose.ui.unit.sp
+        import androidx.lifecycle.ViewModel
+        import androidx.lifecycle.ViewModelProvider
+        import androidx.lifecycle.viewModelScope
+        import androidx.lifecycle.viewmodel.compose.viewModel
+        import androidx.navigation.NavType
+        import androidx.navigation.compose.*
+        import androidx.navigation.navArgument
+        import androidx.room.*
+        import kotlinx.coroutines.Job
+        import kotlinx.coroutines.delay
+        import kotlinx.coroutines.flow.*
+        import kotlinx.coroutines.launch
+        import java.text.SimpleDateFormat
+        import java.util.Date
+        import java.util.Locale
+
+        @Entity(tableName = "notes")
+        data class Note(
+            @PrimaryKey(autoGenerate = true)
+            val id: Long = 0L,
+            val title: String,
+            val content: String,
+            val colorKey: String = "DEFAULT",
+            val category: String? = null,
+            val isPinned: Boolean = false,
+            val isFavorite: Boolean = false,
+            val isArchived: Boolean = false,
+            val isDeleted: Boolean = false,
+            val createdAt: Long = System.currentTimeMillis(),
+            val updatedAt: Long = System.currentTimeMillis()
+        )
+
+        @Dao
+        interface NoteDao {
+            @Query("SELECT * FROM notes WHERE isDeleted = 0 AND isArchived = 0 ORDER BY isPinned DESC, updatedAt DESC")
+            fun getActiveNotes(): Flow<List<Note>>
+
+            @Query("SELECT * FROM notes WHERE isDeleted = 0 AND isArchived = 1 ORDER BY updatedAt DESC")
+            fun getArchivedNotes(): Flow<List<Note>>
+
+            @Query("SELECT * FROM notes WHERE isDeleted = 0 AND isFavorite = 1 ORDER BY updatedAt DESC")
+            fun getFavoriteNotes(): Flow<List<Note>>
+
+            @Query("SELECT * FROM notes WHERE isDeleted = 1 ORDER BY updatedAt DESC")
+            fun getTrashNotes(): Flow<List<Note>>
+
+            @Query("SELECT * FROM notes WHERE id = :id LIMIT 1")
+            suspend fun getNoteById(id: Long): Note?
+
+            @Insert(onConflict = OnConflictStrategy.REPLACE)
+            suspend fun insertOrUpdateNote(note: Note): Long
+
+            @Update
+            suspend fun updateNote(note: Note)
+
+            @Delete
+            suspend fun deletePermanently(note: Note)
+
+            @Query("DELETE FROM notes WHERE isDeleted = 1")
+            suspend fun emptyTrash()
+        }
+
+        @Database(entities = [Note::class], version = 1, exportSchema = false)
+        abstract class NoteDatabase : RoomDatabase() {
+            abstract fun noteDao(): NoteDao
+            companion object {
+                @Volatile private var INSTANCE: NoteDatabase? = null
+                fun getInstance(context: Context): NoteDatabase {
+                    return INSTANCE ?: synchronized(this) {
+                        val instance = Room.databaseBuilder(context.applicationContext, NoteDatabase::class.java, "hujaifa_notes_db").fallbackToDestructiveMigration().build()
+                        INSTANCE = instance
+                        instance
+                    }
+                }
+            }
+        }
+
+        class NoteRepository(private val noteDao: NoteDao) {
+            val activeNotes: Flow<List<Note>> = noteDao.getActiveNotes()
+            val archivedNotes: Flow<List<Note>> = noteDao.getArchivedNotes()
+            val favoriteNotes: Flow<List<Note>> = noteDao.getFavoriteNotes()
+            val trashNotes: Flow<List<Note>> = noteDao.getTrashNotes()
+            suspend fun getNoteById(id: Long): Note? = noteDao.getNoteById(id)
+            suspend fun saveNote(note: Note): Long = noteDao.insertOrUpdateNote(note.copy(updatedAt = System.currentTimeMillis()))
+            suspend fun moveToTrash(note: Note) = noteDao.updateNote(note.copy(isDeleted = true, isPinned = false, updatedAt = System.currentTimeMillis()))
+            suspend fun restoreFromTrash(note: Note) = noteDao.updateNote(note.copy(isDeleted = false, updatedAt = System.currentTimeMillis()))
+            suspend fun deletePermanently(note: Note) = noteDao.deletePermanently(note)
+            suspend fun emptyTrash() = noteDao.emptyTrash()
+        }
+
+        enum class NoteColor(val key: String, val lightColor: Color, val darkColor: Color) {
+            DEFAULT("DEFAULT", Color(0xFFFFFFFF), Color(0xFF252528)),
+            LAVENDER("LAVENDER", Color(0xFFE8DEF8), Color(0xFF4A4458)),
+            PINK("PINK", Color(0xFFFFD8E4), Color(0xFF633B48)),
+            MINT("MINT", Color(0xFFD0F8CE), Color(0xFF2E532D)),
+            SKY_BLUE("SKY_BLUE", Color(0xFFD2E4FF), Color(0xFF2C4362)),
+            PEACH("PEACH", Color(0xFFFFDCC2), Color(0xFF5E3F28)),
+            CREAM("CREAM", Color(0xFFFFF8E1), Color(0xFF4F4628)),
+            YELLOW("YELLOW", Color(0xFFFFF0A6), Color(0xFF5C521E));
+            companion object { fun fromKey(key: String): NoteColor = entries.find { it.key.equals(key, true) } ?: DEFAULT }
+        }
+
+        @Composable
+        fun HujaifaNotesTheme(content: @Composable () -> Unit) {
+            val darkTheme = isSystemInDarkTheme()
+            val colorScheme = if (darkTheme) darkColorScheme(primary = Color(0xFFD0BCFF), background = Color(0xFF141218), surface = Color(0xFF1D1B20))
+                              else lightColorScheme(primary = Color(0xFF6750A4), background = Color(0xFFFCFCFF), surface = Color.White)
+            MaterialTheme(colorScheme = colorScheme, typography = Typography(), content = content)
+        }
+
+        object DateUtils {
+            fun formatDisplayDate(timestamp: Long): String {
+                if (timestamp <= 0L) return ""
+                val sdf = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
+                val formatted = sdf.format(Date(timestamp))
+                if (Locale.getDefault().language != "bn") return formatted
+                val digits = charArrayOf('০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯')
+                val sb = StringBuilder()
+                for (ch in formatted) { if (ch in '0'..'9') sb.append(digits[ch - '0']) else sb.append(ch) }
+                return sb.toString()
+            }
+        }
+
+        enum class NoteFilter { ALL, PINNED, FAVORITES, ARCHIVED }
+        enum class NoteSort { UPDATED_DESC, CREATED_DESC, TITLE_ASC, OLDEST_FIRST }
+        sealed class SaveStatus { object Idle : SaveStatus(); object Saving : SaveStatus(); object Saved : SaveStatus() }
+
+        class NoteViewModel(private val repository: NoteRepository) : ViewModel() {
+            private val _searchQuery = MutableStateFlow("")
+            val searchQuery = _searchQuery.asStateFlow()
+            private val _currentFilter = MutableStateFlow(NoteFilter.ALL)
+            val currentFilter = _currentFilter.asStateFlow()
+            private val _currentSort = MutableStateFlow(NoteSort.UPDATED_DESC)
+            private val _saveStatus = MutableStateFlow<SaveStatus>(SaveStatus.Idle)
+            val saveStatus = _saveStatus.asStateFlow()
+            private var autoSaveJob: Job? = null
+
+            val notes: StateFlow<List<Note>> = combine(repository.activeNotes, repository.archivedNotes, repository.favoriteNotes, _searchQuery, _currentFilter, _currentSort) { active, archived, favorites, query, filter, sort ->
+                val baseList = when (filter) {
+                    NoteFilter.ALL -> active
+                    NoteFilter.PINNED -> active.filter { it.isPinned }
+                    NoteFilter.FAVORITES -> favorites
+                    NoteFilter.ARCHIVED -> archived
+                }
+                val filtered = if (query.isBlank()) baseList else baseList.filter { it.title.contains(query, true) || it.content.contains(query, true) || (it.category?.contains(query, true) == true) }
+                when (sort) {
+                    NoteSort.UPDATED_DESC -> filtered.sortedWith(compareByDescending<Note> { it.isPinned }.thenByDescending { it.updatedAt })
+                    NoteSort.CREATED_DESC -> filtered.sortedByDescending { it.createdAt }
+                    NoteSort.OLDEST_FIRST -> filtered.sortedBy { it.createdAt }
+                    NoteSort.TITLE_ASC -> filtered.sortedBy { it.title.lowercase() }
+                }
+            }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+            val trashNotes = repository.trashNotes.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+            fun onSearchQueryChanged(q: String) { _searchQuery.value = q }
+            fun onFilterSelected(f: NoteFilter) { _currentFilter.value = f }
+            fun onSortSelected(s: NoteSort) { _currentSort.value = s }
+            fun moveToTrash(note: Note) = viewModelScope.launch { repository.moveToTrash(note) }
+            fun restoreFromTrash(note: Note) = viewModelScope.launch { repository.restoreFromTrash(note) }
+            fun deletePermanently(note: Note) = viewModelScope.launch { repository.deletePermanently(note) }
+            fun emptyTrash() = viewModelScope.launch { repository.emptyTrash() }
+            suspend fun getNoteById(id: Long) = repository.getNoteById(id)
+
+            fun scheduleAutoSave(note: Note, onSaved: (Long) -> Unit) {
+                if (note.title.isBlank() && note.content.isBlank()) return
+                autoSaveJob?.cancel()
+                autoSaveJob = viewModelScope.launch {
+                    _saveStatus.value = SaveStatus.Saving
+                    delay(600)
+                    val newId = repository.saveNote(note)
+                    _saveStatus.value = SaveStatus.Saved
+                    onSaved(newId)
+                    delay(1000)
+                    _saveStatus.value = SaveStatus.Idle
+                }
+            }
+
+            suspend fun forceSaveImmediate(note: Note): Long {
+                if (note.title.isBlank() && note.content.isBlank()) return note.id
+                return repository.saveNote(note)
+            }
+        }
+
+        class NoteViewModelFactory(private val repo: NoteRepository) : ViewModelProvider.Factory {
+            override fun <T : ViewModel> create(modelClass: Class<T>): T = NoteViewModel(repo) as T
+        }
+
+        @OptIn(ExperimentalMaterial3Api::class)
+        @Composable
+        fun NoteCard(note: Note, onClick: () -> Unit, modifier: Modifier = Modifier) {
+            val isDark = isSystemInDarkTheme()
+            val noteColor = NoteColor.fromKey(note.colorKey)
+            val cardBg = if (isDark) noteColor.darkColor else noteColor.lightColor
+            val titleDisplay = if (note.title.isNotBlank()) note.title else "নামহীন নোট"
+            Card(onClick = onClick, modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = cardBg), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(text = titleDisplay, fontWeight = FontWeight.Bold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        if (note.isPinned) Icon(Icons.Default.PushPin, "Pinned", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                        if (note.isFavorite) Icon(Icons.Default.Bookmark, "Favorite", tint = Color(0xFFFF9800), modifier = Modifier.size(18.dp))
+                    }
+                    if (note.content.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(text = note.content, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(text = DateUtils.formatDisplayDate(note.updatedAt), style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                }
+            }
+        }
+
+        @Composable
+        fun ColorPicker(selectedColorKey: String, onColorSelected: (String) -> Unit) {
+            val isDark = isSystemInDarkTheme()
+            LazyRow(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(NoteColor.entries.toTypedArray()) { item ->
+                    val color = if (isDark) item.darkColor else item.lightColor
+                    val isSelected = item.key.equals(selectedColorKey, true)
+                    Box(modifier = Modifier.size(38.dp).clip(CircleShape).background(color).border(if (isSelected) 2.5.dp else 1.dp, if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray.copy(0.4f), CircleShape).clickable { onColorSelected(item.key) }, contentAlignment = Alignment.Center) {
+                        if (isSelected) Icon(Icons.Default.Check, null, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+        }
+
+        @OptIn(ExperimentalMaterial3Api::class)
+        @Composable
+        fun HomeScreen(viewModel: NoteViewModel, onNoteClick: (Long) -> Unit, onCreateClick: () -> Unit, onTrashClick: () -> Unit, onSettingsClick: () -> Unit) {
+            val notes by viewModel.notes.collectAsState()
+            val searchQuery by viewModel.searchQuery.collectAsState()
+            val currentFilter by viewModel.currentFilter.collectAsState()
+            var isGridView by remember { mutableStateOf(false) }
+            var showMenu by remember { mutableStateOf(false) }
+
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { Text("Hujaifa notes") },
+                        actions = {
+                            IconButton(onClick = { isGridView = !isGridView }) { Icon(if (isGridView) Icons.Default.ViewAgenda else Icons.Default.GridView, null) }
+                            IconButton(onClick = { showMenu = !showMenu }) { Icon(Icons.Default.MoreVert, null) }
+                            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                                DropdownMenuItem(text = { Text("Trash / ট্র্যাশ") }, onClick = { showMenu = false; onTrashClick() })
+                                DropdownMenuItem(text = { Text("Settings / সেটিংস") }, onClick = { showMenu = false; onSettingsClick() })
+                                HorizontalDivider()
+                                DropdownMenuItem(text = { Text("Sort: Recently Updated") }, onClick = { viewModel.onSortSelected(NoteSort.UPDATED_DESC); showMenu = false })
+                                DropdownMenuItem(text = { Text("Sort: Oldest First") }, onClick = { viewModel.onSortSelected(NoteSort.OLDEST_FIRST); showMenu = false })
+                            }
+                        }
+                    )
+                },
+                floatingActionButton = { ExtendedFloatingActionButton(onClick = onCreateClick, icon = { Icon(Icons.Default.Add, null) }, text = { Text("নতুন নোট") }) }
+            ) { pad ->
+                Column(modifier = Modifier.fillMaxSize().padding(pad).padding(horizontal = 14.dp)) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = viewModel::onSearchQueryChanged,
+                        placeholder = { Text("Search notes / নোট খুঁজুন...") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        leadingIcon = { Icon(Icons.Default.Search, null) },
+                        singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    ScrollableTabRow(selectedTabIndex = currentFilter.ordinal, edgePadding = 0.dp) {
+                        NoteFilter.entries.forEach { filter ->
+                            val label = when (filter) {
+                                NoteFilter.ALL -> "সকল নোট"
+                                NoteFilter.PINNED -> "পিন করা"
+                                NoteFilter.FAVORITES -> "প্রিয়"
+                                NoteFilter.ARCHIVED -> "সংরক্ষণাগার"
+                            }
+                            Tab(selected = currentFilter == filter, onClick = { viewModel.onFilterSelected(filter) }, text = { Text(label) })
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    if (notes.isEmpty()) {
+                        Box(modifier = Modifier.fillMaxSize().padding(bottom = 60.dp), contentAlignment = Alignment.Center) {
+                            Text(if (searchQuery.isNotBlank()) "কোনো ফলাফল পাওয়া যায়নি" else "কোনো নোট নেই!", style = MaterialTheme.typography.titleMedium)
+                        }
+                    } else if (isGridView) {
+                        LazyVerticalStaggeredGrid(columns = StaggeredGridCells.Fixed(2), verticalItemSpacing = 8.dp, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(notes, key = { it.id }) { note -> NoteCard(note, onClick = { onNoteClick(note.id) }) }
+                        }
+                    } else {
+                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(notes, key = { it.id }) { note -> NoteCard(note, onClick = { onNoteClick(note.id) }) }
+                        }
+                    }
+                }
+            }
+        }
+
+        @OptIn(ExperimentalMaterial3Api::class)
+        @Composable
+        fun NoteEditScreen(noteId: Long, viewModel: NoteViewModel, onBack: () -> Unit) {
+            val context = LocalContext.current
+            val scope = rememberCoroutineScope()
+            var currentId by remember { mutableLongStateOf(noteId) }
+            var title by remember { mutableStateOf("") }
+            var content by remember { mutableStateOf("") }
+            var colorKey by remember { mutableStateOf("DEFAULT") }
+            var isPinned by remember { mutableStateOf(false) }
+            var isFavorite by remember { mutableStateOf(false) }
+            val saveStatus by viewModel.saveStatus.collectAsState()
+
+            LaunchedEffect(noteId) {
+                if (noteId > 0L) {
+                    viewModel.getNoteById(noteId)?.let {
+                        currentId = it.id
+                        title = it.title
+                        content = it.content
+                        colorKey = it.colorKey
+                        isPinned = it.isPinned
+                        isFavorite = it.isFavorite
+                    }
+                }
+            }
+
+            fun buildNote() = Note(id = if (currentId > 0) currentId else 0L, title = title, content = content, colorKey = colorKey, isPinned = isPinned, isFavorite = isFavorite)
+            fun autoSave() { if (title.isNotBlank() || content.isNotBlank()) viewModel.scheduleAutoSave(buildNote()) { currentId = it } }
+            val exitAction: () -> Unit = { scope.launch { viewModel.forceSaveImmediate(buildNote()); onBack() } }
+
+            BackHandler { exitAction() }
+
+            val noteColor = NoteColor.fromKey(colorKey)
+            val bg = if (isSystemInDarkTheme()) noteColor.darkColor.copy(0.35f) else noteColor.lightColor.copy(0.35f)
+
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { Text(if (saveStatus is SaveStatus.Saving) "সংরক্ষণ হচ্ছে..." else if (saveStatus is SaveStatus.Saved) "সংরক্ষিত ✓" else "") },
+                        navigationIcon = { IconButton(onClick = exitAction) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) } },
+                        actions = {
+                            IconButton(onClick = { isPinned = !isPinned; autoSave() }) { Icon(Icons.Default.PushPin, null, tint = if (isPinned) MaterialTheme.colorScheme.primary else Color.Gray) }
+                            IconButton(onClick = { isFavorite = !isFavorite; autoSave() }) { Icon(Icons.Default.Bookmark, null, tint = if (isFavorite) Color(0xFFFF9800) else Color.Gray) }
+                            IconButton(onClick = {
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, title)
+                                    putExtra(Intent.EXTRA_TEXT, "$title\n\n$content")
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "Share Note"))
+                            }) { Icon(Icons.Default.Share, null) }
+                        }
+                    )
+                }
+            ) { pad ->
+                Column(modifier = Modifier.fillMaxSize().background(bg).padding(pad).padding(16.dp).verticalScroll(rememberScrollState())) {
+                    ColorPicker(selectedColorKey = colorKey, onColorSelected = { colorKey = it; autoSave() })
+                    TextField(value = title, onValueChange = { title = it; autoSave() }, placeholder = { Text("শিরোনাম (Title)", fontSize = 22.sp) }, colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent), modifier = Modifier.fillMaxWidth())
+                    TextField(value = content, onValueChange = { content = it; autoSave() }, placeholder = { Text("নোটের মূল বক্তব্য লিখুন (Write here...)") }, colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent), modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 300.dp))
+                }
+            }
+        }
+
+        @OptIn(ExperimentalMaterial3Api::class)
+        @Composable
+        fun TrashScreen(viewModel: NoteViewModel, onBack: () -> Unit) {
+            val trashNotes by viewModel.trashNotes.collectAsState()
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { Text("ট্র্যাশ (Trash)") },
+                        navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) } },
+                        actions = { if (trashNotes.isNotEmpty()) IconButton(onClick = { viewModel.emptyTrash() }) { Icon(Icons.Default.DeleteForever, null) } }
+                    )
+                }
+            ) { pad ->
+                if (trashNotes.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize().padding(pad), contentAlignment = Alignment.Center) { Text("ট্র্যাশ খালি") }
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxSize().padding(pad).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(trashNotes, key = { it.id }) { note ->
+                            NoteCard(note, onClick = {})
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                TextButton(onClick = { viewModel.restoreFromTrash(note) }) { Text("পুনরুদ্ধার") }
+                                TextButton(onClick = { viewModel.deletePermanently(note) }) { Text("চিরতরে মুছুন") }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        @OptIn(ExperimentalMaterial3Api::class)
+        @Composable
+        fun SettingsScreen(onBack: () -> Unit) {
+            Scaffold(topBar = { TopAppBar(title = { Text("সেটিংস") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) } }) }) { pad ->
+                Column(modifier = Modifier.fillMaxSize().padding(pad).padding(16.dp)) {
+                    Text("Hujaifa notes", style = MaterialTheme.typography.headlineMedium)
+                    Text("সংস্করণ: 1.0 (অফলাইন এডিশন)")
+                    Spacer(modifier = Modifier.height(16.dp))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("• ১০০% অফলাইন ও সম্পূর্ণ নিরাপদ।\n• অটো সেভ ফিচার ও প্যাস্টেল কালার ব্যাকগ্রাউন্ড।\n• ট্র্যাশ প্রটেকশন ও সহজ শেয়ারিং।")
+                }
+            }
+        }
+
+        class MainActivity : ComponentActivity() {
+            override fun onCreate(savedInstanceState: Bundle?) {
+                super.onCreate(savedInstanceState)
+                val database = NoteDatabase.getInstance(applicationContext)
+                val repository = NoteRepository(database.noteDao())
+                val factory = NoteViewModelFactory(repository)
+
+                setContent {
+                    HujaifaNotesTheme {
+                        val navController = rememberNavController()
+                        val noteViewModel: NoteViewModel = viewModel(factory = factory)
+
+                        NavHost(navController = navController, startDestination = "home") {
+                            composable("home") {
+                                HomeScreen(
+                                    viewModel = noteViewModel,
+                                    onNoteClick = { id -> navController.navigate("edit?id=$id") },
+                                    onCreateClick = { navController.navigate("edit?id=-1") },
+                                    onTrashClick = { navController.navigate("trash") },
+                                    onSettingsClick = { navController.navigate("settings") }
+                                )
+                            }
+                            composable("edit?id={id}", arguments = listOf(navArgument("id") { type = NavType.LongType; defaultValue = -1L })) { backStack ->
+                                val id = backStack.arguments?.getLong("id") ?: -1L
+                                NoteEditScreen(noteId = id, viewModel = noteViewModel, onBack = { navController.popBackStack() })
+                            }
+                            composable("trash") { TrashScreen(viewModel = noteViewModel, onBack = { navController.popBackStack() }) }
+                            composable("settings") { SettingsScreen(onBack = { navController.popBackStack() }) }
+                        }
+                    }
+                }
+            }
+        }
         EOF
 
     - name: Compile and Build Debug APK
