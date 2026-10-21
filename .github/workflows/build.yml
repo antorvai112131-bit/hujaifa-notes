@@ -1,0 +1,160 @@
+name: Build Hujaifa Notes APK
+
+on:
+  push:
+    branches: [ "**" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Java JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v3
+      with:
+        gradle-version: '8.7'
+
+    - name: Download MainActivity from Pastebin and Build Project
+      run: |
+        mkdir -p app/src/main/java/com/personal/colorfulnotes
+        
+        # 1. Download MainActivity.kt from your Pastebin link
+        curl -sL https://pastebin.com/raw/Rb2iAi53 -o app/src/main/java/com/personal/colorfulnotes/MainActivity.kt
+
+        # 2. Generate settings.gradle.kts
+        cat << 'EOF' > settings.gradle.kts
+        pluginManagement {
+            repositories {
+                google()
+                mavenCentral()
+                gradlePluginPortal()
+            }
+        }
+        dependencyResolutionManagement {
+            repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+            repositories {
+                google()
+                mavenCentral()
+            }
+        }
+        rootProject.name = "Hujaifa notes"
+        include(":app")
+        EOF
+
+        # 3. Generate root build.gradle.kts
+        cat << 'EOF' > build.gradle.kts
+        buildscript {
+            repositories {
+                google()
+                mavenCentral()
+            }
+        }
+        plugins {
+            id("com.android.application") version "8.4.1" apply false
+            id("org.jetbrains.kotlin.android") version "1.9.23" apply false
+            id("com.google.devtools.ksp") version "1.9.23-1.0.20" apply false
+        }
+        EOF
+
+        # 4. Generate app/build.gradle.kts
+        cat << 'EOF' > app/build.gradle.kts
+        plugins {
+            id("com.android.application")
+            id("org.jetbrains.kotlin.android")
+            id("com.google.devtools.ksp")
+        }
+
+        android {
+            namespace = "com.personal.colorfulnotes"
+            compileSdk = 34
+
+            defaultConfig {
+                applicationId = "com.personal.colorfulnotes"
+                minSdk = 24
+                targetSdk = 34
+                versionCode = 1
+                versionName = "1.0"
+                vectorDrawables.useSupportLibrary = true
+            }
+
+            buildTypes {
+                release {
+                    isMinifyEnabled = false
+                    proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+                }
+            }
+            compileOptions {
+                sourceCompatibility = JavaVersion.VERSION_17
+                targetCompatibility = JavaVersion.VERSION_17
+            }
+            kotlinOptions { jvmTarget = "17" }
+            buildFeatures { compose = true }
+            composeOptions { kotlinCompilerExtensionVersion = "1.5.11" }
+            packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
+        }
+
+        dependencies {
+            val roomVersion = "2.6.1"
+            val composeBom = platform("androidx.compose:compose-bom:2024.05.00")
+
+            implementation(composeBom)
+            implementation("androidx.core:core-ktx:1.13.1")
+            implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+            implementation("androidx.activity:activity-compose:1.9.0")
+            implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
+            implementation("androidx.navigation:navigation-compose:2.7.7")
+
+            implementation("androidx.compose.ui:ui")
+            implementation("androidx.compose.ui:ui-graphics")
+            implementation("androidx.compose.ui:ui-tooling-preview")
+            implementation("androidx.compose.material3:material3")
+            implementation("androidx.compose.material:material-icons-extended")
+
+            implementation("androidx.room:room-runtime:$roomVersion")
+            implementation("androidx.room:room-ktx:$roomVersion")
+            ksp("androidx.room:room-compiler:$roomVersion")
+        }
+        EOF
+
+        # 5. Generate AndroidManifest.xml
+        cat << 'EOF' > app/src/main/AndroidManifest.xml
+        <?xml version="1.0" encoding="utf-8"?>
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <application
+                android:allowBackup="true"
+                android:icon="@mipmap/ic_launcher"
+                android:label="Hujaifa notes"
+                android:roundIcon="@mipmap/ic_launcher_round"
+                android:supportsRtl="true"
+                android:theme="@android:style/Theme.Material.NoActionBar">
+                <activity
+                    android:name=".MainActivity"
+                    android:exported="true"
+                    android:windowSoftInputMode="adjustResize">
+                    <intent-filter>
+                        <action android:name="android.intent.action.MAIN" />
+                        <category android:name="android.intent.category.LAUNCHER" />
+                    </intent-filter>
+                </activity>
+            </application>
+        </manifest>
+        EOF
+
+    - name: Compile and Build Debug APK
+      run: gradle assembleDebug --stacktrace
+
+    - name: Upload Hujaifa Notes APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: Hujaifa-Notes-APK
+        path: app/build/outputs/apk/debug/app-debug.apk
