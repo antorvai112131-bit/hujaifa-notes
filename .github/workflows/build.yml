@@ -28,6 +28,12 @@ jobs:
       run: |
         mkdir -p app/src/main/java/com/personal/colorfulnotes
 
+        # 0. Generate gradle.properties (This was missing!)
+        cat << 'EOF' > gradle.properties
+        android.useAndroidX=true
+        org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+        EOF
+
         # 1. Generate settings.gradle.kts
         cat << 'EOF' > settings.gradle.kts
         pluginManagement {
@@ -131,7 +137,7 @@ jobs:
         }
         EOF
 
-        # 4. Generate AndroidManifest.xml (Icon issue fixed)
+        # 4. Generate AndroidManifest.xml
         cat << 'EOF' > app/src/main/AndroidManifest.xml
         <?xml version="1.0" encoding="utf-8"?>
         <manifest xmlns:android="http://schemas.android.com/apk/res/android">
